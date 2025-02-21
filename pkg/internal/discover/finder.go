@@ -6,16 +6,16 @@ import (
 
 	"github.com/mariomac/pipes/pipe"
 
-	"github.com/grafana/beyla/pkg/beyla"
-	"github.com/grafana/beyla/pkg/internal/ebpf"
-	"github.com/grafana/beyla/pkg/internal/ebpf/generictracer"
-	"github.com/grafana/beyla/pkg/internal/ebpf/gotracer"
-	"github.com/grafana/beyla/pkg/internal/ebpf/gpuevent"
-	"github.com/grafana/beyla/pkg/internal/ebpf/httptracer"
-	"github.com/grafana/beyla/pkg/internal/ebpf/tctracer"
-	"github.com/grafana/beyla/pkg/internal/imetrics"
-	"github.com/grafana/beyla/pkg/internal/pipe/global"
-	"github.com/grafana/beyla/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/beyla"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf/generictracer"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf/gotracer"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf/gpuevent"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf/httptracer"
+	"github.com/grafana/beyla/v2/pkg/internal/ebpf/tctracer"
+	"github.com/grafana/beyla/v2/pkg/internal/imetrics"
+	"github.com/grafana/beyla/v2/pkg/internal/pipe/global"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
 )
 
 type ProcessFinder struct {
@@ -98,12 +98,10 @@ func (pf *ProcessFinder) Start() (<-chan *ebpf.Instrumentable, <-chan *ebpf.Inst
 func newCommonTracersGroup(cfg *beyla.Config) []ebpf.Tracer {
 	tracers := []ebpf.Tracer{}
 
-	if cfg.EBPF.ContextPropagationEnabled {
-		tracers = append(tracers, tctracer.New(cfg))
-	}
-
 	if cfg.EBPF.UseTCForL7CP {
 		tracers = append(tracers, httptracer.New(cfg))
+	} else if cfg.EBPF.ContextPropagationEnabled {
+		tracers = append(tracers, tctracer.New(cfg))
 	}
 
 	return tracers

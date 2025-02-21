@@ -21,8 +21,8 @@ package beyla
 import (
 	"time"
 
-	"github.com/grafana/beyla/pkg/internal/netolly/flow"
-	"github.com/grafana/beyla/pkg/internal/netolly/transform/cidr"
+	"github.com/grafana/beyla/v2/pkg/internal/netolly/flow"
+	"github.com/grafana/beyla/v2/pkg/internal/netolly/transform/cidr"
 )
 
 const (
@@ -33,6 +33,8 @@ const (
 type NetworkConfig struct {
 	// Enable network metrics.
 	// Default value is false (disabled)
+	// Deprecated: add "network" to BEYLA_OTEL_METRIC_FEATURES or BEYLA_PROMETHEUS_FEATURES
+	// TODO Beyla 3.0: remove
 	Enable bool `yaml:"enable" env:"BEYLA_NETWORK_METRICS"`
 
 	// Specify the source type for network events, e.g tc or socket_filter. The tc implementation

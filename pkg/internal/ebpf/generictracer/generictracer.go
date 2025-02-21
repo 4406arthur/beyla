@@ -14,14 +14,14 @@ import (
 	"github.com/gavv/monotime"
 	"github.com/vishvananda/netlink"
 
-	"github.com/grafana/beyla/pkg/beyla"
-	ebpfcommon "github.com/grafana/beyla/pkg/internal/ebpf/common"
-	"github.com/grafana/beyla/pkg/internal/exec"
-	"github.com/grafana/beyla/pkg/internal/goexec"
-	"github.com/grafana/beyla/pkg/internal/imetrics"
-	"github.com/grafana/beyla/pkg/internal/netolly/ifaces"
-	"github.com/grafana/beyla/pkg/internal/request"
-	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/beyla/v2/pkg/beyla"
+	ebpfcommon "github.com/grafana/beyla/v2/pkg/internal/ebpf/common"
+	"github.com/grafana/beyla/v2/pkg/internal/exec"
+	"github.com/grafana/beyla/v2/pkg/internal/goexec"
+	"github.com/grafana/beyla/v2/pkg/internal/imetrics"
+	"github.com/grafana/beyla/v2/pkg/internal/netolly/ifaces"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/svc"
 )
 
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 bpf ../../../../bpf/generic_tracer.c -- -I../../../../bpf/headers
@@ -128,13 +128,14 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 	}
 
 	if p.cfg.EBPF.TrackRequestHeaders || p.cfg.EBPF.UseTCForL7CP || p.cfg.EBPF.ContextPropagationEnabled {
-		if ebpfcommon.SupportsEBPFLoops() {
-			p.log.Info("Found Linux kernel later than 5.17, enabling trace information parsing")
+		if ebpfcommon.SupportsEBPFLoops(p.log, p.cfg.EBPF.OverrideBPFLoopEnabled) {
+			p.log.Info("Found compatible Linux kernel, enabling trace information parsing")
 			loader = loadBpf_tp
 			if p.cfg.EBPF.BpfDebug {
 				loader = loadBpf_tp_debug
 			}
 		}
+		p.log.Info("Found incompatible Linux kernel, disabling trace information parsing")
 	}
 
 	return loader()
@@ -236,7 +237,7 @@ func (p *Tracer) GoProbes() map[string][]*ebpfcommon.ProbeDesc {
 }
 
 func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
-	return map[string]ebpfcommon.ProbeDesc{
+	kp := map[string]ebpfcommon.ProbeDesc{
 		// Both sys accept probes use the same kretprobe.
 		// We could tap into __sys_accept4, but we might be more prone to
 		// issues with the internal kernel code changing.
@@ -260,6 +261,11 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 		"sys_connect": {
 			Required: true,
 			End:      p.bpfObjects.BeylaKretprobeSysConnect,
+		},
+		"sock_recvmsg": {
+			Required: true,
+			Start:    p.bpfObjects.BeylaKprobeSockRecvmsg,
+			End:      p.bpfObjects.BeylaKretprobeSockRecvmsg,
 		},
 		"tcp_connect": {
 			Required: true,
@@ -306,6 +312,22 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 			End:      p.bpfObjects.BeylaKretprobeUnixStreamSendmsg,
 		},
 	}
+
+	if p.cfg.EBPF.ContextPropagationEnabled {
+		// tcp_rate_check_app_limited and tcp_sendmsg_fastopen are backup
+		// for tcp_sendmsg_locked which doesn't fire on certain kernels
+		// if sk_msg is attached.
+		kp["tcp_rate_check_app_limited"] = ebpfcommon.ProbeDesc{
+			Required: false,
+			Start:    p.bpfObjects.BeylaKprobeTcpRateCheckAppLimited,
+		}
+		kp["tcp_sendmsg_fastopen"] = ebpfcommon.ProbeDesc{
+			Required: false,
+			Start:    p.bpfObjects.BeylaKprobeTcpRateCheckAppLimited,
+		}
+	}
+
+	return kp
 }
 
 func (p *Tracer) Tracepoints() map[string]ebpfcommon.ProbeDesc {
@@ -334,11 +356,6 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				Required: false,
 				Start:    p.bpfObjects.BeylaUprobeSslWriteEx,
 				End:      p.bpfObjects.BeylaUretprobeSslWriteEx,
-			}},
-			"SSL_do_handshake": {{
-				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslDoHandshake,
-				End:      p.bpfObjects.BeylaUretprobeSslDoHandshake,
 			}},
 			"SSL_shutdown": {{
 				Required: false,

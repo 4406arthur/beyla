@@ -5,7 +5,7 @@ package otel
 import (
 	"testing"
 
-	k8s "github.com/grafana/beyla/test/integration/k8s/common"
+	k8s "github.com/grafana/beyla/v2/test/integration/k8s/common"
 )
 
 // to find process information in the prometheus database,
@@ -17,5 +17,6 @@ func TestProcessMetrics(t *testing.T) {
 		"k8s_replicaset_name": "^otherinstance-.*",
 		"k8s_pod_name":        "^otherinstance-.*",
 		"k8s_owner_name":      "^otherinstance$",
+		"service_instance_id": "^default\\.otherinstance-.+\\.otherinstance",
 	}))
 }

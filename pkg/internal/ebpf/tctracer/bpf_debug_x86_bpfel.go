@@ -31,6 +31,11 @@ type bpf_debugConnectionInfoT struct {
 	D_port uint16
 }
 
+type bpf_debugCpSupportDataT struct {
+	T_key      bpf_debugTraceKeyT
+	RealClient uint8
+}
+
 type bpf_debugEgressKeyT struct {
 	S_port uint16
 	D_port uint16
@@ -56,6 +61,12 @@ type bpf_debugGrpcFramesCtxT struct {
 	Args            bpf_debugCallProtocolArgsT
 }
 
+type bpf_debugHttp2ConnInfoDataT struct {
+	Id    uint64
+	Flags uint8
+	_     [7]byte
+}
+
 type bpf_debugHttp2ConnStreamT struct {
 	PidConn  bpf_debugPidConnectionInfoT
 	StreamId uint32
@@ -77,10 +88,10 @@ type bpf_debugHttp2GrpcRequestT struct {
 		UserPid uint32
 		Ns      uint32
 	}
-	Ssl     uint8
-	NewConn uint8
-	_       [2]byte
-	Tp      struct {
+	Ssl       uint8
+	_         [3]byte
+	NewConnId uint64
+	Tp        struct {
 		TraceId  [16]uint8
 		SpanId   [8]uint8
 		ParentId [8]uint8
@@ -117,7 +128,7 @@ type bpf_debugHttpInfoT struct {
 	ConnInfo        bpf_debugConnectionInfoT
 	StartMonotimeNs uint64
 	EndMonotimeNs   uint64
-	Buf             [192]uint8
+	Buf             [256]uint8
 	Len             uint32
 	RespLen         uint32
 	Status          uint16
@@ -293,15 +304,14 @@ type bpf_debugProgramSpecs struct {
 type bpf_debugMapSpecs struct {
 	ActiveNodejsIds           *ebpf.MapSpec `ebpf:"active_nodejs_ids"`
 	ActiveSslConnections      *ebpf.MapSpec `ebpf:"active_ssl_connections"`
-	ActiveSslHandshakes       *ebpf.MapSpec `ebpf:"active_ssl_handshakes"`
 	ActiveSslReadArgs         *ebpf.MapSpec `ebpf:"active_ssl_read_args"`
 	ActiveSslWriteArgs        *ebpf.MapSpec `ebpf:"active_ssl_write_args"`
 	ActiveUnixSocks           *ebpf.MapSpec `ebpf:"active_unix_socks"`
 	AsyncResetArgs            *ebpf.MapSpec `ebpf:"async_reset_args"`
 	BufMem                    *ebpf.MapSpec `ebpf:"buf_mem"`
-	ClientConnectInfo         *ebpf.MapSpec `ebpf:"client_connect_info"`
 	CloneMap                  *ebpf.MapSpec `ebpf:"clone_map"`
 	ConnectionMetaMem         *ebpf.MapSpec `ebpf:"connection_meta_mem"`
+	CpSupportConnectInfo      *ebpf.MapSpec `ebpf:"cp_support_connect_info"`
 	DebugEvents               *ebpf.MapSpec `ebpf:"debug_events"`
 	Events                    *ebpf.MapSpec `ebpf:"events"`
 	GrpcFramesCtxMem          *ebpf.MapSpec `ebpf:"grpc_frames_ctx_mem"`
@@ -357,15 +367,14 @@ func (o *bpf_debugObjects) Close() error {
 type bpf_debugMaps struct {
 	ActiveNodejsIds           *ebpf.Map `ebpf:"active_nodejs_ids"`
 	ActiveSslConnections      *ebpf.Map `ebpf:"active_ssl_connections"`
-	ActiveSslHandshakes       *ebpf.Map `ebpf:"active_ssl_handshakes"`
 	ActiveSslReadArgs         *ebpf.Map `ebpf:"active_ssl_read_args"`
 	ActiveSslWriteArgs        *ebpf.Map `ebpf:"active_ssl_write_args"`
 	ActiveUnixSocks           *ebpf.Map `ebpf:"active_unix_socks"`
 	AsyncResetArgs            *ebpf.Map `ebpf:"async_reset_args"`
 	BufMem                    *ebpf.Map `ebpf:"buf_mem"`
-	ClientConnectInfo         *ebpf.Map `ebpf:"client_connect_info"`
 	CloneMap                  *ebpf.Map `ebpf:"clone_map"`
 	ConnectionMetaMem         *ebpf.Map `ebpf:"connection_meta_mem"`
+	CpSupportConnectInfo      *ebpf.Map `ebpf:"cp_support_connect_info"`
 	DebugEvents               *ebpf.Map `ebpf:"debug_events"`
 	Events                    *ebpf.Map `ebpf:"events"`
 	GrpcFramesCtxMem          *ebpf.Map `ebpf:"grpc_frames_ctx_mem"`
@@ -404,15 +413,14 @@ func (m *bpf_debugMaps) Close() error {
 	return _Bpf_debugClose(
 		m.ActiveNodejsIds,
 		m.ActiveSslConnections,
-		m.ActiveSslHandshakes,
 		m.ActiveSslReadArgs,
 		m.ActiveSslWriteArgs,
 		m.ActiveUnixSocks,
 		m.AsyncResetArgs,
 		m.BufMem,
-		m.ClientConnectInfo,
 		m.CloneMap,
 		m.ConnectionMetaMem,
+		m.CpSupportConnectInfo,
 		m.DebugEvents,
 		m.Events,
 		m.GrpcFramesCtxMem,

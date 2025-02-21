@@ -9,15 +9,8 @@ import (
 	"github.com/mariomac/pipes/pipe"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/grafana/beyla/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
 )
-
-// TODO deprecated (REMOVE) - use TracePrinter instead
-type PrintEnabled bool
-
-func (p PrintEnabled) Enabled() bool {
-	return bool(p)
-}
 
 type TracePrinter string
 

@@ -1,10 +1,11 @@
 package request
 
 import (
-	"go.opentelemetry.io/otel/attribute"
-	semconv "go.opentelemetry.io/otel/semconv/v1.19.0"
+	"strings"
 
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
+	"go.opentelemetry.io/otel/attribute"
+
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
 )
 
 func HTTPRequestMethod(val string) attribute.KeyValue {
@@ -91,8 +92,9 @@ func DBOperationName(val string) attribute.KeyValue {
 	return attribute.Key(attr.DBOperation).String(val)
 }
 
-func DBSystem(val string) attribute.KeyValue {
-	return attribute.Key(semconv.DBSystemKey).String(val)
+func DBSystemName(val string) attribute.KeyValue {
+	// TODO: replace by semconv.DBSystemName when we update to OTEL semconv library 1.30
+	return attribute.Key(attr.DBSystemName).String(val)
 }
 
 func ErrorType(val string) attribute.KeyValue {
@@ -117,6 +119,38 @@ func SpanPeer(span *Span) string {
 	}
 
 	return span.Peer
+}
+
+func HTTPClientHost(span *Span) string {
+	if strings.Index(span.Statement, SchemeHostSeparator) > 0 {
+		schemeHost := strings.Split(span.Statement, SchemeHostSeparator)
+		if schemeHost[1] != "" {
+			return schemeHost[1]
+		}
+	}
+
+	return HostAsServer(span)
+}
+
+func HTTPScheme(span *Span) string {
+	if strings.Index(span.Statement, SchemeHostSeparator) > 0 {
+		schemeHost := strings.Split(span.Statement, SchemeHostSeparator)
+		return schemeHost[0]
+	}
+
+	return ""
+}
+
+func URLFull(scheme, host, path string) string {
+	url := path
+	if len(host) > 0 {
+		url = host + url
+		if len(scheme) > 0 {
+			url = scheme + "://" + url
+		}
+	}
+
+	return url
 }
 
 func HostAsServer(span *Span) string {

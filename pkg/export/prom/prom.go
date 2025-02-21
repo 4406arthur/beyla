@@ -13,16 +13,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/grafana/beyla/pkg/buildinfo"
-	"github.com/grafana/beyla/pkg/export/attributes"
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
-	"github.com/grafana/beyla/pkg/export/expire"
-	"github.com/grafana/beyla/pkg/export/instrumentations"
-	"github.com/grafana/beyla/pkg/export/otel"
-	"github.com/grafana/beyla/pkg/internal/connector"
-	"github.com/grafana/beyla/pkg/internal/pipe/global"
-	"github.com/grafana/beyla/pkg/internal/request"
-	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/beyla/v2/pkg/buildinfo"
+	"github.com/grafana/beyla/v2/pkg/export/attributes"
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
+	"github.com/grafana/beyla/v2/pkg/export/expire"
+	"github.com/grafana/beyla/v2/pkg/export/instrumentations"
+	"github.com/grafana/beyla/v2/pkg/export/otel"
+	"github.com/grafana/beyla/v2/pkg/internal/connector"
+	"github.com/grafana/beyla/v2/pkg/internal/pipe/global"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/svc"
 )
 
 // injectable function reference for testing
@@ -97,11 +97,6 @@ type PrometheusConfig struct {
 	Port int    `yaml:"port" env:"BEYLA_PROMETHEUS_PORT"`
 	Path string `yaml:"path" env:"BEYLA_PROMETHEUS_PATH"`
 
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportTarget bool `yaml:"report_target" env:"BEYLA_METRICS_REPORT_TARGET"`
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportPeerInfo bool `yaml:"report_peer" env:"BEYLA_METRICS_REPORT_PEER"`
-
 	DisableBuildInfo bool `yaml:"disable_build_info" env:"BEYLA_PROMETHEUS_DISABLE_BUILD_INFO"`
 
 	// Features of metrics that are can be exported. Accepted values are "application" and "network".
@@ -136,7 +131,15 @@ func (p *PrometheusConfig) ServiceGraphMetricsEnabled() bool {
 }
 
 func (p *PrometheusConfig) NetworkMetricsEnabled() bool {
+	return p.NetworkFlowBytesEnabled() || p.NetworkInterzoneMetricsEnabled()
+}
+
+func (p *PrometheusConfig) NetworkFlowBytesEnabled() bool {
 	return slices.Contains(p.Features, otel.FeatureNetwork)
+}
+
+func (p *PrometheusConfig) NetworkInterzoneMetricsEnabled() bool {
+	return slices.Contains(p.Features, otel.FeatureNetworkInterZone)
 }
 
 func (p *PrometheusConfig) EBPFEnabled() bool {

@@ -17,6 +17,8 @@ typedef enum {
     // http
     _url_ptr_pos,
     _path_ptr_pos,
+    _host_ptr_pos,
+    _scheme_ptr_pos,
     _method_ptr_pos,
     _status_code_ptr_pos,
     _content_length_ptr_pos,
@@ -57,7 +59,11 @@ typedef enum {
     _sarama_broker_conn_pos,
     _sarama_bufconn_conn_pos,
     // grpc versioning
-    _operate_headers_new,
+    _grpc_one_six_zero,
+    _grpc_one_six_nine,
+    // grpc 1.69
+    _grpc_server_stream_stream,
+    _grpc_server_stream_st_ptr_pos,
     _last_go_offset,
 } go_offset_const;
 

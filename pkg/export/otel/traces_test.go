@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,14 +27,14 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/grafana/beyla/pkg/export/attributes"
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
-	"github.com/grafana/beyla/pkg/export/instrumentations"
-	"github.com/grafana/beyla/pkg/internal/imetrics"
-	"github.com/grafana/beyla/pkg/internal/pipe/global"
-	"github.com/grafana/beyla/pkg/internal/request"
-	"github.com/grafana/beyla/pkg/internal/sqlprune"
-	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/beyla/v2/pkg/export/attributes"
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
+	"github.com/grafana/beyla/v2/pkg/export/instrumentations"
+	"github.com/grafana/beyla/v2/pkg/internal/imetrics"
+	"github.com/grafana/beyla/v2/pkg/internal/pipe/global"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/sqlprune"
+	"github.com/grafana/beyla/v2/pkg/internal/svc"
 )
 
 func TestHTTPTracesEndpoint(t *testing.T) {
@@ -527,7 +528,7 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		assert.Equal(t, 5, attrs.Len())
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBOperation), "SELECT")
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBCollectionName), "credentials")
-		ensureTraceStrAttr(t, attrs, semconv.DBSystemKey, "other_sql")
+		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBSystemName), "other_sql")
 		ensureTraceAttrNotExists(t, attrs, attribute.Key(attr.DBQueryText))
 	})
 
@@ -548,7 +549,7 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		assert.Equal(t, 5, attrs.Len())
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBOperation), "SELECT")
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBCollectionName), "credentials")
-		ensureTraceStrAttr(t, attrs, semconv.DBSystemKey, "other_sql")
+		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBSystemName), "other_sql")
 		ensureTraceAttrNotExists(t, attrs, attribute.Key(attr.DBQueryText))
 	})
 
@@ -569,7 +570,7 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		assert.Equal(t, 6, attrs.Len())
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBOperation), "SELECT")
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBCollectionName), "credentials")
-		ensureTraceStrAttr(t, attrs, semconv.DBSystemKey, "other_sql")
+		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBSystemName), "other_sql")
 		ensureTraceStrAttr(t, attrs, attribute.Key(attr.DBQueryText), "SELECT password FROM credentials WHERE username=\"bill\"")
 	})
 	t.Run("test Kafka trace generation", func(t *testing.T) {
@@ -616,7 +617,7 @@ func TestTraceSampling(t *testing.T) {
 			Route:        "/test" + strconv.Itoa(i),
 			Status:       200,
 			Service:      svc.Attrs{},
-			TraceID:      randomTraceID(),
+			TraceID:      RandomTraceID(),
 		}
 		spans = append(spans, span)
 	}
@@ -672,6 +673,95 @@ func TestTraceSampling(t *testing.T) {
 		// it's a probabilistic matter, we don't want this test to become
 		// flaky as some of them could report even 4-5 samples
 		assert.GreaterOrEqual(t, 6, len(tr))
+	})
+}
+
+func TestTraceSkipSpanMetrics(t *testing.T) {
+	spans := []request.Span{}
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		span := request.Span{Type: request.EventTypeHTTP,
+			RequestStart: start.UnixNano(),
+			Start:        start.Add(time.Second).UnixNano(),
+			End:          start.Add(3 * time.Second).UnixNano(),
+			Method:       "GET",
+			Route:        "/test" + strconv.Itoa(i),
+			Status:       200,
+			Service:      svc.Attrs{},
+			TraceID:      RandomTraceID(),
+		}
+		spans = append(spans, span)
+	}
+
+	t.Run("test with span metrics on", func(t *testing.T) {
+		receiver := makeTracesTestReceiverWithSpanMetrics([]string{"http"})
+
+		sampler := sdktrace.AlwaysSample()
+		attrs, err := receiver.getConstantAttributes()
+		assert.Nil(t, err)
+
+		tr := []ptrace.Traces{}
+
+		exporter := TestExporter{
+			collector: func(td ptrace.Traces) {
+				tr = append(tr, td)
+			},
+		}
+
+		receiver.processSpans(exporter, spans, attrs, sampler)
+		assert.Equal(t, 10, len(tr))
+
+		for _, ts := range tr {
+			for i := 0; i < ts.ResourceSpans().Len(); i++ {
+				rs := ts.ResourceSpans().At(i)
+				for j := 0; j < rs.ScopeSpans().Len(); j++ {
+					ss := rs.ScopeSpans().At(j)
+					for k := 0; k < ss.Spans().Len(); k++ {
+						span := ss.Spans().At(k)
+						if strings.HasPrefix(span.Name(), "GET /test") {
+							v, ok := span.Attributes().Get(string(attr.SkipSpanMetrics.OTEL()))
+							assert.True(t, ok)
+							assert.Equal(t, true, v.Bool())
+						}
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("test with span metrics off", func(t *testing.T) {
+		receiver := makeTracesTestReceiver([]string{"http"})
+
+		sampler := sdktrace.AlwaysSample()
+		attrs, err := receiver.getConstantAttributes()
+		assert.Nil(t, err)
+
+		tr := []ptrace.Traces{}
+
+		exporter := TestExporter{
+			collector: func(td ptrace.Traces) {
+				tr = append(tr, td)
+			},
+		}
+
+		receiver.processSpans(exporter, spans, attrs, sampler)
+		assert.Equal(t, 10, len(tr))
+
+		for _, ts := range tr {
+			for i := 0; i < ts.ResourceSpans().Len(); i++ {
+				rs := ts.ResourceSpans().At(i)
+				for j := 0; j < rs.ScopeSpans().Len(); j++ {
+					ss := rs.ScopeSpans().At(j)
+					for k := 0; k < ss.Spans().Len(); k++ {
+						span := ss.Spans().At(k)
+						if strings.HasPrefix(span.Name(), "GET /test") {
+							_, ok := span.Attributes().Get(string(attr.SkipSpanMetrics.OTEL()))
+							assert.False(t, ok)
+						}
+					}
+				}
+			}
+		}
 	})
 }
 
@@ -908,6 +998,7 @@ func TestTraces_InternalInstrumentation(t *testing.T) {
 			ReportersCacheLen: 16,
 			Instrumentations:  []string{instrumentations.InstrumentationALL},
 		},
+		false,
 		&global.ContextInfo{
 			Metrics: internalTraces,
 		},
@@ -1352,6 +1443,21 @@ func makeTracesTestReceiver(instr []string) *tracesOTELReceiver {
 			ReportersCacheLen: 16,
 			Instrumentations:  instr,
 		},
+		false,
+		&global.ContextInfo{},
+		attributes.Selection{},
+	)
+}
+
+func makeTracesTestReceiverWithSpanMetrics(instr []string) *tracesOTELReceiver {
+	return makeTracesReceiver(context.Background(),
+		TracesConfig{
+			CommonEndpoint:    "http://something",
+			BatchTimeout:      10 * time.Millisecond,
+			ReportersCacheLen: 16,
+			Instrumentations:  instr,
+		},
+		true,
 		&global.ContextInfo{},
 		attributes.Selection{},
 	)

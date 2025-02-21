@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/grafana/beyla/pkg/beyla"
-	"github.com/grafana/beyla/pkg/internal/helpers/container"
-	"github.com/grafana/beyla/pkg/internal/kube"
-	"github.com/grafana/beyla/pkg/internal/testutil"
-	"github.com/grafana/beyla/pkg/kubecache/informer"
-	"github.com/grafana/beyla/pkg/kubecache/meta"
-	"github.com/grafana/beyla/pkg/services"
+	"github.com/grafana/beyla/v2/pkg/beyla"
+	"github.com/grafana/beyla/v2/pkg/internal/helpers/container"
+	"github.com/grafana/beyla/v2/pkg/internal/kube"
+	"github.com/grafana/beyla/v2/pkg/internal/testutil"
+	"github.com/grafana/beyla/v2/pkg/kubecache/informer"
+	"github.com/grafana/beyla/v2/pkg/kubecache/meta"
+	"github.com/grafana/beyla/v2/pkg/services"
 )
 
 const timeout = 5 * time.Second
@@ -67,7 +67,7 @@ func TestWatcherKubeEnricher(t *testing.T) {
 
 			// Setup a fake K8s API connected to the watcherKubeEnricher
 			fInformer := &fakeInformer{}
-			store := kube.NewStore(fInformer, kube.MetadataSources{})
+			store := kube.NewStore(fInformer, kube.ResourceLabels{})
 			wkeNodeFunc, err := WatcherKubeEnricherProvider(context.TODO(), &fakeMetadataProvider{store: store})()
 			require.NoError(t, err)
 			inputCh, outputCh := make(chan []Event[processAttrs], 10), make(chan []Event[processAttrs], 10)
@@ -107,7 +107,7 @@ func TestWatcherKubeEnricherWithMatcher(t *testing.T) {
 	processInfo = fakeProcessInfo
 	// Setup a fake K8s API connected to the watcherKubeEnricher
 	fInformer := &fakeInformer{}
-	store := kube.NewStore(fInformer, kube.MetadataSources{})
+	store := kube.NewStore(fInformer, kube.ResourceLabels{})
 	wkeNodeFunc, err := WatcherKubeEnricherProvider(context.TODO(), &fakeMetadataProvider{store: store})()
 	require.NoError(t, err)
 	pipeConfig := beyla.Config{}

@@ -35,10 +35,10 @@ type bpfHttp2GrpcRequestT struct {
 		UserPid uint32
 		Ns      uint32
 	}
-	Ssl     uint8
-	NewConn uint8
-	_       [2]byte
-	Tp      struct {
+	Ssl       uint8
+	_         [3]byte
+	NewConnId uint64
+	Tp        struct {
 		TraceId  [16]uint8
 		SpanId   [8]uint8
 		ParentId [8]uint8
@@ -54,7 +54,7 @@ type bpfHttpInfoT struct {
 	ConnInfo        bpfConnectionInfoT
 	StartMonotimeNs uint64
 	EndMonotimeNs   uint64
-	Buf             [192]uint8
+	Buf             [256]uint8
 	Len             uint32
 	RespLen         uint32
 	Status          uint16
@@ -85,8 +85,10 @@ type bpfHttpRequestTrace struct {
 	EndMonotimeNs     uint64
 	Method            [7]uint8
 	Path              [100]uint8
+	Host              [100]uint8
+	Scheme            [10]uint8
 	Status            uint16
-	_                 [2]byte
+	_                 [4]byte
 	Conn              bpfConnectionInfoT
 	ContentLength     int64
 	Tp                struct {

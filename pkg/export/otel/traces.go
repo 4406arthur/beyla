@@ -39,13 +39,13 @@ import (
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
 
-	"github.com/grafana/beyla/pkg/export/attributes"
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
-	"github.com/grafana/beyla/pkg/export/instrumentations"
-	"github.com/grafana/beyla/pkg/internal/imetrics"
-	"github.com/grafana/beyla/pkg/internal/pipe/global"
-	"github.com/grafana/beyla/pkg/internal/request"
-	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/beyla/v2/pkg/export/attributes"
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
+	"github.com/grafana/beyla/v2/pkg/export/instrumentations"
+	"github.com/grafana/beyla/v2/pkg/internal/imetrics"
+	"github.com/grafana/beyla/v2/pkg/internal/pipe/global"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/svc"
 )
 
 func tlog() *slog.Logger {
@@ -130,27 +130,29 @@ func (m *TracesConfig) guessProtocol() Protocol {
 	return ProtocolHTTPProtobuf
 }
 
-func makeTracesReceiver(ctx context.Context, cfg TracesConfig, ctxInfo *global.ContextInfo, userAttribSelection attributes.Selection) *tracesOTELReceiver {
+func makeTracesReceiver(ctx context.Context, cfg TracesConfig, spanMetricsEnabled bool, ctxInfo *global.ContextInfo, userAttribSelection attributes.Selection) *tracesOTELReceiver {
 	return &tracesOTELReceiver{
-		ctx:        ctx,
-		cfg:        cfg,
-		ctxInfo:    ctxInfo,
-		attributes: userAttribSelection,
-		is:         instrumentations.NewInstrumentationSelection(cfg.Instrumentations),
+		ctx:                ctx,
+		cfg:                cfg,
+		ctxInfo:            ctxInfo,
+		attributes:         userAttribSelection,
+		is:                 instrumentations.NewInstrumentationSelection(cfg.Instrumentations),
+		spanMetricsEnabled: spanMetricsEnabled,
 	}
 }
 
 // TracesReceiver creates a terminal node that consumes request.Spans and sends OpenTelemetry metrics to the configured consumers.
-func TracesReceiver(ctx context.Context, cfg TracesConfig, ctxInfo *global.ContextInfo, userAttribSelection attributes.Selection) pipe.FinalProvider[[]request.Span] {
-	return makeTracesReceiver(ctx, cfg, ctxInfo, userAttribSelection).provideLoop
+func TracesReceiver(ctx context.Context, cfg TracesConfig, spanMetricsEnabled bool, ctxInfo *global.ContextInfo, userAttribSelection attributes.Selection) pipe.FinalProvider[[]request.Span] {
+	return makeTracesReceiver(ctx, cfg, spanMetricsEnabled, ctxInfo, userAttribSelection).provideLoop
 }
 
 type tracesOTELReceiver struct {
-	ctx        context.Context
-	cfg        TracesConfig
-	ctxInfo    *global.ContextInfo
-	attributes attributes.Selection
-	is         instrumentations.InstrumentationSelection
+	ctx                context.Context
+	cfg                TracesConfig
+	ctxInfo            *global.ContextInfo
+	attributes         attributes.Selection
+	is                 instrumentations.InstrumentationSelection
+	spanMetricsEnabled bool
 }
 
 func GetUserSelectedAttributes(attrs attributes.Selection) (map[attr.Name]struct{}, error) {
@@ -166,6 +168,18 @@ func GetUserSelectedAttributes(attrs attributes.Selection) (map[attr.Name]struct
 	}
 
 	return traceAttrs, err
+}
+
+func (tr *tracesOTELReceiver) getConstantAttributes() (map[attr.Name]struct{}, error) {
+	traceAttrs, err := GetUserSelectedAttributes(tr.attributes)
+	if err != nil {
+		return nil, err
+	}
+
+	if tr.spanMetricsEnabled {
+		traceAttrs[attr.SkipSpanMetrics] = struct{}{}
+	}
+	return traceAttrs, nil
 }
 
 func (tr *tracesOTELReceiver) spanDiscarded(span *request.Span) bool {
@@ -228,10 +242,14 @@ func (tr *tracesOTELReceiver) provideLoop() (pipe.FinalFunc[[]request.Span], err
 			return
 		}
 
-		traceAttrs, err := GetUserSelectedAttributes(tr.attributes)
+		traceAttrs, err := tr.getConstantAttributes()
 		if err != nil {
 			slog.Error("error selecting user trace attributes", "error", err)
 			return
+		}
+
+		if tr.spanMetricsEnabled {
+			traceAttrs[attr.SkipSpanMetrics] = struct{}{}
 		}
 
 		sampler := tr.cfg.Sampler.Implementation()
@@ -435,9 +453,10 @@ func GenerateTracesWithAttributes(span *request.Span, hostID string, attrs []att
 	resourceAttrsMap.CopyTo(rs.Resource().Attributes())
 
 	traceID := pcommon.TraceID(span.TraceID)
-	spanID := pcommon.SpanID(randomSpanID())
+	spanID := pcommon.SpanID(RandomSpanID())
+	// This should never happen
 	if traceID.IsEmpty() {
-		traceID = pcommon.TraceID(randomTraceID())
+		traceID = pcommon.TraceID(RandomTraceID())
 	}
 
 	if hasSubSpans {
@@ -484,7 +503,7 @@ func createSubSpans(span *request.Span, parentSpanID pcommon.SpanID, traceID pco
 	spQ.SetKind(ptrace.SpanKindInternal)
 	spQ.SetEndTimestamp(pcommon.NewTimestampFromTime(t.Start))
 	spQ.SetTraceID(traceID)
-	spQ.SetSpanID(pcommon.SpanID(randomSpanID()))
+	spQ.SetSpanID(pcommon.SpanID(RandomSpanID()))
 	spQ.SetParentSpanID(parentSpanID)
 
 	// Create a child span showing the processing time
@@ -497,7 +516,7 @@ func createSubSpans(span *request.Span, parentSpanID pcommon.SpanID, traceID pco
 	if span.SpanID.IsValid() {
 		spP.SetSpanID(pcommon.SpanID(span.SpanID))
 	} else {
-		spP.SetSpanID(pcommon.SpanID(randomSpanID()))
+		spP.SetSpanID(pcommon.SpanID(RandomSpanID()))
 	}
 	spP.SetParentSpanID(parentSpanID)
 }
@@ -574,6 +593,10 @@ func (tr *tracesOTELReceiver) acceptSpan(span *request.Span) bool {
 	return false
 }
 
+// TODO use semconv.DBSystemRedis when we update to OTEL semantic conventions library 1.30
+var dbSystemRedis = attribute.String(string(attr.DBSystemName), semconv.DBSystemRedis.Value.AsString())
+var spanMetricsSkip = attribute.Bool(string(attr.SkipSpanMetrics), true)
+
 // nolint:cyclop
 func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
@@ -602,11 +625,19 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			request.ServerPort(span.HostPort),
 		}
 	case request.EventTypeHTTPClient:
+		host := request.HTTPClientHost(span)
+		scheme := request.HTTPScheme(span)
+		url := span.Path
+		if span.HasOriginalHost() {
+			url = request.URLFull(scheme, host, span.Path)
+		}
+
 		attrs = []attribute.KeyValue{
 			request.HTTPRequestMethod(span.Method),
 			request.HTTPResponseStatusCode(span.Status),
-			request.HTTPUrlFull(span.Path),
-			request.ServerAddr(request.HostAsServer(span)),
+			request.HTTPUrlFull(url),
+			semconv.HTTPScheme(scheme),
+			request.ServerAddr(host),
 			request.ServerPort(span.HostPort),
 			request.HTTPRequestBodySize(int(span.RequestLength())),
 		}
@@ -622,7 +653,7 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			span.DBSystem(), // We can distinguish in the future for MySQL, Postgres etc
+			span.DBSystemName(), // We can distinguish in the future for MySQL, Postgres etc
 		}
 		if _, ok := optionalAttrs[attr.DBQueryText]; ok {
 			attrs = append(attrs, request.DBQueryText(span.Statement))
@@ -639,7 +670,7 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			semconv.DBSystemRedis,
+			dbSystemRedis,
 		}
 		operation := span.Method
 		if operation != "" {
@@ -661,6 +692,10 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			semconv.MessagingClientID(span.Statement),
 			operation,
 		}
+	}
+
+	if _, ok := optionalAttrs[attr.SkipSpanMetrics]; ok {
+		attrs = append(attrs, spanMetricsSkip)
 	}
 
 	return attrs

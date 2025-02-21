@@ -20,9 +20,9 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
-	ebpfcommon "github.com/grafana/beyla/pkg/internal/ebpf/common"
-	"github.com/grafana/beyla/pkg/internal/exec"
-	"github.com/grafana/beyla/pkg/internal/goexec"
+	ebpfcommon "github.com/grafana/beyla/v2/pkg/internal/ebpf/common"
+	"github.com/grafana/beyla/v2/pkg/internal/exec"
+	"github.com/grafana/beyla/v2/pkg/internal/goexec"
 )
 
 func ilog() *slog.Logger {
@@ -431,6 +431,11 @@ func getCgroupPath() (string, error) {
 
 	enabled, err := v2.Enabled()
 	if !enabled {
+		if _, pathErr := os.Stat(filepath.Join(cgroupPath, "unified")); pathErr != nil {
+			// Return the original error to the caller, pathErr is only required to set the Cgroup path.
+			// Catch all errors here to capture permissions issues as well as existence errors.
+			return cgroupPath, err
+		}
 		cgroupPath = filepath.Join(cgroupPath, "unified")
 	}
 	return cgroupPath, err

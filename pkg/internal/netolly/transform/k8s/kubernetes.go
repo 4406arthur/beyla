@@ -26,10 +26,11 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/mariomac/pipes/pipe"
 
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
-	"github.com/grafana/beyla/pkg/internal/kube"
-	"github.com/grafana/beyla/pkg/internal/netolly/ebpf"
-	"github.com/grafana/beyla/pkg/transform"
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
+	"github.com/grafana/beyla/v2/pkg/internal/kube"
+	"github.com/grafana/beyla/v2/pkg/internal/netolly/ebpf"
+	"github.com/grafana/beyla/v2/pkg/kubecache/informer"
+	"github.com/grafana/beyla/v2/pkg/transform"
 )
 
 const (
@@ -42,6 +43,8 @@ const (
 	attrSuffixOwnerType = ".owner.type"
 	attrSuffixHostIP    = ".node.ip"
 	attrSuffixHostName  = ".node.name"
+
+	cloudZoneLabel = "topology.kubernetes.io/zone"
 )
 
 const alreadyLoggedIPsCacheLen = 256
@@ -119,8 +122,8 @@ func (n *decorator) transform(flow *ebpf.Record) bool {
 
 // decorate the flow with Kube metadata. Returns false if there is no metadata found for such IP
 func (n *decorator) decorate(flow *ebpf.Record, prefix, ip string) bool {
-	meta := n.kube.ObjectMetaByIP(ip)
-	if meta == nil {
+	cachedObj := n.kube.ObjectMetaByIP(ip)
+	if cachedObj == nil {
 		if n.log.Enabled(context.TODO(), slog.LevelDebug) {
 			// avoid spoofing the debug logs with the same message for each flow whose IP can't be decorated
 			if !n.alreadyLoggedIPs.Contains(ip) {
@@ -130,6 +133,7 @@ func (n *decorator) decorate(flow *ebpf.Record, prefix, ip string) bool {
 		}
 		return false
 	}
+	meta := cachedObj.Meta
 	ownerName, ownerKind := meta.Name, meta.Kind
 	if owner := kube.TopOwner(meta.Pod); owner != nil {
 		ownerName, ownerKind = owner.Name, owner.Kind
@@ -140,13 +144,9 @@ func (n *decorator) decorate(flow *ebpf.Record, prefix, ip string) bool {
 	flow.Attrs.Metadata[attr.Name(prefix+attrSuffixType)] = meta.Kind
 	flow.Attrs.Metadata[attr.Name(prefix+attrSuffixOwnerName)] = ownerName
 	flow.Attrs.Metadata[attr.Name(prefix+attrSuffixOwnerType)] = ownerKind
-	// add any other ownership label (they might be several, e.g. replicaset and deployment)¡
-	if meta.Pod != nil && meta.Pod.HostIp != "" {
-		flow.Attrs.Metadata[attr.Name(prefix+attrSuffixHostIP)] = meta.Pod.HostIp
-		if host := n.kube.ObjectMetaByIP(meta.Pod.HostIp); host != nil {
-			flow.Attrs.Metadata[attr.Name(prefix+attrSuffixHostName)] = host.Name
-		}
-	}
+
+	n.nodeLabels(flow, prefix, meta)
+
 	// decorate other names from metadata, if required
 	if prefix == attrPrefixDst {
 		if flow.Attrs.DstName == "" {
@@ -158,6 +158,31 @@ func (n *decorator) decorate(flow *ebpf.Record, prefix, ip string) bool {
 		}
 	}
 	return true
+}
+
+func (n *decorator) nodeLabels(flow *ebpf.Record, prefix string, meta *informer.ObjectMeta) {
+	var nodeLabels map[string]string
+	// add any other ownership label (they might be several, e.g. replicaset and deployment)
+	if meta.Pod != nil && meta.Pod.HostIp != "" {
+		flow.Attrs.Metadata[attr.Name(prefix+attrSuffixHostIP)] = meta.Pod.HostIp
+		if host := n.kube.ObjectMetaByIP(meta.Pod.HostIp); host != nil {
+			flow.Attrs.Metadata[attr.Name(prefix+attrSuffixHostName)] = host.Meta.Name
+			nodeLabels = host.Meta.Labels
+		}
+	} else if meta.Kind == "Node" {
+		nodeLabels = meta.Labels
+	}
+	if nodeLabels != nil {
+		// this isn't strictly a Kubernetes attribute, but in Kubernetes
+		// clusters this information is inferred from Node annotations
+		if zone, ok := nodeLabels[cloudZoneLabel]; ok {
+			if prefix == attrPrefixDst {
+				flow.Attrs.DstZone = zone
+			} else {
+				flow.Attrs.SrcZone = zone
+			}
+		}
+	}
 }
 
 // newDecorator create a new transform

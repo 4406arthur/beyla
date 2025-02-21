@@ -10,7 +10,9 @@
         "Header"
       ],
       "net/url.URL": [
-        "Path"
+        "Path",
+        "Host",
+        "Scheme"
       ],
       "net/http.Response": [
         "StatusCode"
@@ -53,6 +55,12 @@
       ],
       "net/http.http2serverConn": [
         "conn"
+      ],
+      "net/http.http2Framer": [
+        "w"
+      ],
+      "net/http.http2MetaHeadersFrame": [
+        "Fields"
       ]
     }
   },
@@ -99,6 +107,10 @@
       "google.golang.org/grpc/internal/transport.bufWriter": [
         "buf",
         "offset"
+      ],
+      "google.golang.org/grpc/internal/transport.ServerStream": [
+        "[1.69.0]Stream",
+        "[1.69.0]st"
       ]
     }
   },

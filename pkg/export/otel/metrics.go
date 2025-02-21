@@ -19,16 +19,17 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.19.0"
+	"go.opentelemetry.io/otel/trace"
 
-	"github.com/grafana/beyla/pkg/export/attributes"
-	attr "github.com/grafana/beyla/pkg/export/attributes/names"
-	"github.com/grafana/beyla/pkg/export/instrumentations"
-	"github.com/grafana/beyla/pkg/export/otel/metric"
-	instrument "github.com/grafana/beyla/pkg/export/otel/metric/api/metric"
-	"github.com/grafana/beyla/pkg/internal/imetrics"
-	"github.com/grafana/beyla/pkg/internal/pipe/global"
-	"github.com/grafana/beyla/pkg/internal/request"
-	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/beyla/v2/pkg/export/attributes"
+	attr "github.com/grafana/beyla/v2/pkg/export/attributes/names"
+	"github.com/grafana/beyla/v2/pkg/export/instrumentations"
+	"github.com/grafana/beyla/v2/pkg/export/otel/metric"
+	instrument "github.com/grafana/beyla/v2/pkg/export/otel/metric/api/metric"
+	"github.com/grafana/beyla/v2/pkg/internal/imetrics"
+	"github.com/grafana/beyla/v2/pkg/internal/pipe/global"
+	"github.com/grafana/beyla/v2/pkg/internal/request"
+	"github.com/grafana/beyla/v2/pkg/internal/svc"
 )
 
 func mlog() *slog.Logger {
@@ -55,12 +56,13 @@ const (
 	AggregationExplicit    = "explicit_bucket_histogram"
 	AggregationExponential = "base2_exponential_bucket_histogram"
 
-	FeatureNetwork     = "network"
-	FeatureApplication = "application"
-	FeatureSpan        = "application_span"
-	FeatureGraph       = "application_service_graph"
-	FeatureProcess     = "application_process"
-	FeatureEBPF        = "ebpf"
+	FeatureNetwork          = "network"
+	FeatureNetworkInterZone = "network_inter_zone"
+	FeatureApplication      = "application"
+	FeatureSpan             = "application_span"
+	FeatureGraph            = "application_service_graph"
+	FeatureProcess          = "application_process"
+	FeatureEBPF             = "ebpf"
 )
 
 type MetricsConfig struct {
@@ -77,14 +79,6 @@ type MetricsConfig struct {
 
 	// InsecureSkipVerify is not standard, so we don't follow the same naming convention
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify" env:"BEYLA_OTEL_INSECURE_SKIP_VERIFY"`
-
-	// ReportTarget specifies whether http.target should be submitted as a metric attribute. It is disabled by
-	// default to avoid cardinality explosion in paths with IDs. In that case, it is recommended to group these
-	// requests in the Routes node
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportTarget bool `yaml:"report_target" env:"BEYLA_METRICS_REPORT_TARGET"`
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportPeerInfo bool `yaml:"report_peer" env:"BEYLA_METRICS_REPORT_PEER"`
 
 	Buckets              Buckets `yaml:"buckets"`
 	HistogramAggregation string  `yaml:"histogram_aggregation" env:"OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION"`
@@ -168,7 +162,15 @@ func (m *MetricsConfig) OTelMetricsEnabled() bool {
 }
 
 func (m *MetricsConfig) NetworkMetricsEnabled() bool {
+	return m.NetworkFlowBytesEnabled() || m.NetworkInterzoneMetricsEnabled()
+}
+
+func (m *MetricsConfig) NetworkFlowBytesEnabled() bool {
 	return slices.Contains(m.Features, FeatureNetwork)
+}
+
+func (m *MetricsConfig) NetworkInterzoneMetricsEnabled() bool {
+	return slices.Contains(m.Features, FeatureNetworkInterZone)
 }
 
 func (m *MetricsConfig) Enabled() bool {
@@ -805,88 +807,90 @@ func (r *Metrics) record(span *request.Span, mr *MetricsReporter) {
 	t := span.Timings()
 	duration := t.End.Sub(t.RequestStart).Seconds()
 
+	ctx := trace.ContextWithSpanContext(r.ctx, trace.SpanContext{}.WithTraceID(span.TraceID).WithSpanID(span.SpanID).WithTraceFlags(trace.TraceFlags(span.Flags)))
+
 	if otelSpanAccepted(span, mr) {
 		switch span.Type {
 		case request.EventTypeHTTP:
 			if mr.is.HTTPEnabled() {
 				// TODO: for more accuracy, there must be a way to set the metric time from the actual span end time
 				httpDuration, attrs := r.httpDuration.ForRecord(span)
-				httpDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				httpDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 
 				httpRequestSize, attrs := r.httpRequestSize.ForRecord(span)
-				httpRequestSize.Record(r.ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
+				httpRequestSize.Record(ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeGRPC:
 			if mr.is.GRPCEnabled() {
 				grpcDuration, attrs := r.grpcDuration.ForRecord(span)
-				grpcDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				grpcDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeGRPCClient:
 			if mr.is.GRPCEnabled() {
 				grpcClientDuration, attrs := r.grpcClientDuration.ForRecord(span)
-				grpcClientDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				grpcClientDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeHTTPClient:
 			if mr.is.HTTPEnabled() {
 				httpClientDuration, attrs := r.httpClientDuration.ForRecord(span)
-				httpClientDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				httpClientDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 				httpClientRequestSize, attrs := r.httpClientRequestSize.ForRecord(span)
-				httpClientRequestSize.Record(r.ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
+				httpClientRequestSize.Record(ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeRedisServer, request.EventTypeRedisClient, request.EventTypeSQLClient:
 			if mr.is.DBEnabled() {
 				dbClientDuration, attrs := r.dbClientDuration.ForRecord(span)
-				dbClientDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				dbClientDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeKafkaClient, request.EventTypeKafkaServer:
 			if mr.is.MQEnabled() {
 				switch span.Method {
 				case request.MessagingPublish:
 					msgPublishDuration, attrs := r.msgPublishDuration.ForRecord(span)
-					msgPublishDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+					msgPublishDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 				case request.MessagingProcess:
 					msgProcessDuration, attrs := r.msgProcessDuration.ForRecord(span)
-					msgProcessDuration.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+					msgProcessDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 				}
 			}
 		case request.EventTypeGPUKernelLaunch:
 			if mr.is.GPUEnabled() {
 				gcalls, attrs := r.gpuKernelCallsTotal.ForRecord(span)
-				gcalls.Add(r.ctx, 1, instrument.WithAttributeSet(attrs))
+				gcalls.Add(ctx, 1, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeGPUMalloc:
 			if mr.is.GPUEnabled() {
 				gmem, attrs := r.gpuMemoryAllocsTotal.ForRecord(span)
-				gmem.Add(r.ctx, span.ContentLength, instrument.WithAttributeSet(attrs))
+				gmem.Add(ctx, span.ContentLength, instrument.WithAttributeSet(attrs))
 			}
 		}
 	}
 
 	if mr.cfg.SpanMetricsEnabled() {
 		sml, attrs := r.spanMetricsLatency.ForRecord(span)
-		sml.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+		sml.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 
 		smct, attrs := r.spanMetricsCallsTotal.ForRecord(span)
-		smct.Add(r.ctx, 1, instrument.WithAttributeSet(attrs))
+		smct.Add(ctx, 1, instrument.WithAttributeSet(attrs))
 
 		smst, attrs := r.spanMetricsSizeTotal.ForRecord(span)
-		smst.Add(r.ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
+		smst.Add(ctx, float64(span.RequestLength()), instrument.WithAttributeSet(attrs))
 	}
 
 	if mr.cfg.ServiceGraphMetricsEnabled() {
 		if !span.IsSelfReferenceSpan() || mr.cfg.AllowServiceGraphSelfReferences {
 			if span.IsClientSpan() {
 				sgc, attrs := r.serviceGraphClient.ForRecord(span)
-				sgc.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				sgc.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 			} else {
 				sgs, attrs := r.serviceGraphServer.ForRecord(span)
-				sgs.Record(r.ctx, duration, instrument.WithAttributeSet(attrs))
+				sgs.Record(ctx, duration, instrument.WithAttributeSet(attrs))
 			}
 			sgt, attrs := r.serviceGraphTotal.ForRecord(span)
-			sgt.Add(r.ctx, 1, instrument.WithAttributeSet(attrs))
+			sgt.Add(ctx, 1, instrument.WithAttributeSet(attrs))
 			if request.SpanStatusCode(span) == codes.Error {
 				sgf, attrs := r.serviceGraphFailed.ForRecord(span)
-				sgf.Add(r.ctx, 1, instrument.WithAttributeSet(attrs))
+				sgf.Add(ctx, 1, instrument.WithAttributeSet(attrs))
 			}
 		}
 	}

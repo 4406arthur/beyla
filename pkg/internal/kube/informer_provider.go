@@ -15,8 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/grafana/beyla/pkg/kubecache/meta"
-	"github.com/grafana/beyla/pkg/kubeflags"
+	"github.com/grafana/beyla/v2/pkg/kubecache/meta"
+	"github.com/grafana/beyla/v2/pkg/kubeflags"
 )
 
 const (
@@ -34,7 +34,7 @@ type MetadataConfig struct {
 	SyncTimeout       time.Duration
 	ResyncPeriod      time.Duration
 	MetaCacheAddr     string
-	MetadataSources   MetadataSources
+	ResourceLabels    ResourceLabels
 	RestrictLocalNode bool
 }
 
@@ -107,7 +107,7 @@ func (mp *MetadataProvider) Get(ctx context.Context) (*Store, error) {
 		return nil, err
 	}
 
-	mp.metadata = NewStore(informer, mp.cfg.MetadataSources)
+	mp.metadata = NewStore(informer, mp.cfg.ResourceLabels)
 
 	return mp.metadata, nil
 }

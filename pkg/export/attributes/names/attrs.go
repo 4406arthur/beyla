@@ -44,7 +44,7 @@ const (
 	ConnectionType         = Name("connection_type")
 	DBOperation            = Name("db.operation.name")
 	DBCollectionName       = Name("db.collection.name")
-	DBSystem               = Name(semconv.DBSystemKey)
+	DBSystemName           = Name("db.system.name")
 	ErrorType              = Name("error.type")
 	RPCMethod              = Name(semconv.RPCMethodKey)
 	RPCSystem              = Name(semconv.RPCSystemKey)
@@ -80,6 +80,8 @@ const (
 	Iface      = Name("iface")
 	SrcCIDR    = Name("src.cidr")
 	DstCIDR    = Name("dst.cidr")
+	SrcZone    = Name("src.zone")
+	DstZone    = Name("dst.zone")
 
 	ClientPort = Name("client.port")
 
@@ -143,6 +145,7 @@ const (
 	HostID   = Name(semconv.HostIDKey)
 
 	ServiceInstanceID = Name(semconv.ServiceInstanceIDKey)
+	SkipSpanMetrics   = Name("span.metrics.skip")
 )
 
 // traces related attributes
