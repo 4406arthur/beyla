@@ -66,7 +66,7 @@ func ProcessWatcherFunc(ctx context.Context, cfg *beyla.Config) pipe.StartFunc[[
 		fetchPorts:        true,  // must be true until we've activated the bpf watcher component
 		bpfWatcherEnabled: false, // async set by listening on the bpfWatchEvents channel
 		stateMux:          sync.Mutex{},
-		findingCriteria:   FindingCriteria(cfg),
+		findingCriteria:   FindingCriteria(cfg, CriteriaMatcherServices),
 	}
 	if acc.interval == 0 {
 		acc.interval = defaultPollInterval

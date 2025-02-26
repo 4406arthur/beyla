@@ -199,7 +199,7 @@ func TestPortsFetchRequired(t *testing.T) {
 		stateMux:          sync.Mutex{},
 		bpfWatcherEnabled: false,
 		fetchPorts:        true,
-		findingCriteria:   FindingCriteria(cfg),
+		findingCriteria:   FindingCriteria(cfg, CriteriaMatcherServices),
 	}
 
 	accounterOutput := make(chan []Event[processAttrs], 1)

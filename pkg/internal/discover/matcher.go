@@ -15,12 +15,20 @@ import (
 	"github.com/grafana/beyla/v2/pkg/services"
 )
 
+type CriteriaMatcherMode int
+
+const (
+	CriteriaMatcherServices CriteriaMatcherMode = iota
+	CriteriaMatcherSurvey
+)
+
 // CriteriaMatcherProvider filters the processes that match the discovery criteria.
-func CriteriaMatcherProvider(cfg *beyla.Config) pipe.MiddleProvider[[]Event[processAttrs], []Event[ProcessMatch]] {
+func CriteriaMatcherProvider(cfg *beyla.Config, mode CriteriaMatcherMode) pipe.MiddleProvider[[]Event[processAttrs], []Event[ProcessMatch]] {
 	return func() (pipe.MiddleFunc[[]Event[processAttrs], []Event[ProcessMatch]], error) {
 		m := &matcher{
 			log:             slog.With("component", "discover.CriteriaMatcher"),
-			criteria:        FindingCriteria(cfg),
+			mode:            mode,
+			criteria:        FindingCriteria(cfg, mode),
 			excludeCriteria: append(cfg.Discovery.ExcludeServices, cfg.Discovery.DefaultExcludeServices...),
 			processHistory:  map[PID]*services.ProcessInfo{},
 		}
@@ -31,6 +39,7 @@ func CriteriaMatcherProvider(cfg *beyla.Config) pipe.MiddleProvider[[]Event[proc
 
 type matcher struct {
 	log             *slog.Logger
+	mode            CriteriaMatcherMode
 	criteria        services.DefinitionCriteria
 	excludeCriteria services.DefinitionCriteria
 	// processHistory keeps track of the processes that have been already matched and submitted for
@@ -122,6 +131,9 @@ func (m *matcher) filterDeleted(obj processAttrs) (Event[ProcessMatch], bool) {
 }
 
 func (m *matcher) isExcluded(obj *processAttrs, proc *services.ProcessInfo) bool {
+	if m.mode == CriteriaMatcherSurvey {
+		return false
+	}
 	for i := range m.excludeCriteria {
 		m.log.Debug("checking exclusion criteria", "pid", proc.Pid, "comm", proc.ExePath)
 		if m.matchProcess(obj, proc, &m.excludeCriteria[i]) {
@@ -193,7 +205,7 @@ func (m *matcher) matchByAttributes(actual *processAttrs, required *services.Att
 	return true
 }
 
-func FindingCriteria(cfg *beyla.Config) services.DefinitionCriteria {
+func FindingCriteria(cfg *beyla.Config, mode CriteriaMatcherMode) services.DefinitionCriteria {
 	if cfg.Discovery.SystemWide {
 		// will return all the executables in the system
 		return services.DefinitionCriteria{
@@ -203,17 +215,25 @@ func FindingCriteria(cfg *beyla.Config) services.DefinitionCriteria {
 			},
 		}
 	}
-	finderCriteria := cfg.Discovery.Services
-	// Merge the old, individual single-service selector,
-	// with the new, map-based multi-services selector.
-	if cfg.Exec.IsSet() || cfg.Port.Len() > 0 {
-		finderCriteria = slices.Clone(cfg.Discovery.Services)
-		finderCriteria = append(finderCriteria, services.Attributes{
-			Name:      cfg.ServiceName,
-			Namespace: cfg.ServiceNamespace,
-			Path:      cfg.Exec,
-			OpenPorts: cfg.Port,
-		})
+	var finderCriteria services.DefinitionCriteria
+	switch mode {
+	case CriteriaMatcherServices:
+		finderCriteria = cfg.Discovery.Services
+		// Merge the old, individual single-service selector,
+		// with the new, map-based multi-services selector.
+		if cfg.Exec.IsSet() || cfg.Port.Len() > 0 {
+			finderCriteria = slices.Clone(cfg.Discovery.Services)
+			finderCriteria = append(finderCriteria, services.Attributes{
+				Name:      cfg.ServiceName,
+				Namespace: cfg.ServiceNamespace,
+				Path:      cfg.Exec,
+				OpenPorts: cfg.Port,
+			})
+		}
+	case CriteriaMatcherSurvey:
+		finderCriteria = cfg.Discovery.Survey
+	default:
+		panic("bug! unknown criteria mode")
 	}
 	// normalize criteria that only define metadata (e.g. k8s)
 	// but do neither define executable name nor port: configure them to match
@@ -248,10 +268,15 @@ var processInfo = func(pp processAttrs) (*services.ProcessInfo, error) {
 			return nil, fmt.Errorf("can't read /proc/<pid>/fd information: %w", err)
 		}
 	}
+	cmdLine, err := proc.Cmdline()
+	if err != nil {
+		cmdLine = ""
+	}
 	return &services.ProcessInfo{
 		Pid:       proc.Pid,
 		PPid:      ppid,
 		ExePath:   exePath,
+		CmdLine:   cmdLine,
 		OpenPorts: pp.openPorts,
 	}, nil
 }

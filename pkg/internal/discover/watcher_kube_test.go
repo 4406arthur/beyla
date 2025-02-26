@@ -129,7 +129,7 @@ func TestWatcherKubeEnricherWithMatcher(t *testing.T) {
       instrument: "ebpf"
       lang: "go.*"
 `), &pipeConfig))
-	mtchNodeFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	mtchNodeFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	inputCh, connectCh := make(chan []Event[processAttrs], 10), make(chan []Event[processAttrs], 10)
 	outputCh := make(chan []Event[ProcessMatch], 10)

@@ -315,7 +315,7 @@ func (c *Config) Enabled(feature Feature) bool {
 	case FeatureNetO11y:
 		return c.NetworkFlows.Enable || c.promNetO11yEnabled() || c.otelNetO11yEnabled()
 	case FeatureAppO11y:
-		return c.Port.Len() > 0 || c.Exec.IsSet() || len(c.Discovery.Services) > 0 || c.Discovery.SystemWide
+		return c.Port.Len() > 0 || c.Exec.IsSet() || len(c.Discovery.Services) > 0 || c.Discovery.SystemWide || len(c.Discovery.Survey) > 0
 	}
 	return false
 }

@@ -27,23 +27,33 @@ type ProcessFinder struct {
 
 // nodesMap stores ProcessFinder pipeline architecture
 type nodesMap struct {
+	// Service instrumentation
 	ProcessWatcher      pipe.Start[[]Event[processAttrs]]
 	WatcherKubeEnricher pipe.Middle[[]Event[processAttrs], []Event[processAttrs]]
 	CriteriaMatcher     pipe.Middle[[]Event[processAttrs], []Event[ProcessMatch]]
 	ExecTyper           pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.Instrumentable]]
 	ContainerDBUpdater  pipe.Middle[[]Event[ebpf.Instrumentable], []Event[ebpf.Instrumentable]]
 	TraceAttacher       pipe.Final[[]Event[ebpf.Instrumentable]]
+
+	// Service survey (discovery only)
+	SurveyCriteriaMatcher pipe.Middle[[]Event[processAttrs], []Event[ProcessMatch]]
+	SurveyExecTyper       pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.Instrumentable]]
+	Surveyor              pipe.Final[[]Event[ebpf.Instrumentable]]
 }
 
 func (pf *nodesMap) Connect() {
 	pf.ProcessWatcher.SendTo(pf.WatcherKubeEnricher)
-	pf.WatcherKubeEnricher.SendTo(pf.CriteriaMatcher)
+	pf.WatcherKubeEnricher.SendTo(pf.CriteriaMatcher, pf.SurveyCriteriaMatcher)
 	pf.CriteriaMatcher.SendTo(pf.ExecTyper)
 	pf.ExecTyper.SendTo(pf.ContainerDBUpdater)
 	pf.ContainerDBUpdater.SendTo(pf.TraceAttacher)
+	pf.SurveyCriteriaMatcher.SendTo(pf.SurveyExecTyper)
+	pf.SurveyExecTyper.SendTo(pf.Surveyor)
 }
 
-func processWatcher(pf *nodesMap) *pipe.Start[[]Event[processAttrs]] { return &pf.ProcessWatcher }
+func processWatcher(pf *nodesMap) *pipe.Start[[]Event[processAttrs]] {
+	return &pf.ProcessWatcher
+}
 func ptrWatcherKubeEnricher(pf *nodesMap) *pipe.Middle[[]Event[processAttrs], []Event[processAttrs]] {
 	return &pf.WatcherKubeEnricher
 }
@@ -56,7 +66,18 @@ func execTyper(pf *nodesMap) *pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.In
 func containerDBUpdater(pf *nodesMap) *pipe.Middle[[]Event[ebpf.Instrumentable], []Event[ebpf.Instrumentable]] {
 	return &pf.ContainerDBUpdater
 }
-func traceAttacher(pf *nodesMap) *pipe.Final[[]Event[ebpf.Instrumentable]] { return &pf.TraceAttacher }
+func traceAttacher(pf *nodesMap) *pipe.Final[[]Event[ebpf.Instrumentable]] {
+	return &pf.TraceAttacher
+}
+func surveyCriteriaMatcher(pf *nodesMap) *pipe.Middle[[]Event[processAttrs], []Event[ProcessMatch]] {
+	return &pf.SurveyCriteriaMatcher
+}
+func surveyExecTyper(pf *nodesMap) *pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.Instrumentable]] {
+	return &pf.SurveyExecTyper
+}
+func surveyor(pf *nodesMap) *pipe.Final[[]Event[ebpf.Instrumentable]] {
+	return &pf.Surveyor
+}
 
 func NewProcessFinder(ctx context.Context, cfg *beyla.Config, ctxInfo *global.ContextInfo, tracesInput chan<- []request.Span) *ProcessFinder {
 	return &ProcessFinder{ctx: ctx, cfg: cfg, ctxInfo: ctxInfo, tracesInput: tracesInput}
@@ -72,8 +93,10 @@ func (pf *ProcessFinder) Start() (<-chan *ebpf.Instrumentable, <-chan *ebpf.Inst
 	pipe.AddStart(gb, processWatcher, ProcessWatcherFunc(pf.ctx, pf.cfg))
 	pipe.AddMiddleProvider(gb, ptrWatcherKubeEnricher,
 		WatcherKubeEnricherProvider(pf.ctx, pf.ctxInfo.K8sInformer))
-	pipe.AddMiddleProvider(gb, criteriaMatcher, CriteriaMatcherProvider(pf.cfg))
+	pipe.AddMiddleProvider(gb, criteriaMatcher, CriteriaMatcherProvider(pf.cfg, CriteriaMatcherServices))
 	pipe.AddMiddleProvider(gb, execTyper, ExecTyperProvider(pf.cfg, pf.ctxInfo.Metrics, pf.ctxInfo.K8sInformer))
+	pipe.AddMiddleProvider(gb, surveyCriteriaMatcher, CriteriaMatcherProvider(pf.cfg, CriteriaMatcherSurvey))
+	pipe.AddMiddleProvider(gb, surveyExecTyper, ExecTyperProvider(pf.cfg, pf.ctxInfo.Metrics, pf.ctxInfo.K8sInformer))
 	pipe.AddMiddleProvider(gb, containerDBUpdater, ContainerDBUpdaterProvider(pf.ctx, pf.ctxInfo.K8sInformer))
 	pipe.AddFinalProvider(gb, traceAttacher, TraceAttacherProvider(&TraceAttacher{
 		Cfg:                 pf.cfg,
@@ -83,6 +106,7 @@ func (pf *ProcessFinder) Start() (<-chan *ebpf.Instrumentable, <-chan *ebpf.Inst
 		Metrics:             pf.ctxInfo.Metrics,
 		SpanSignalsShortcut: pf.tracesInput,
 	}))
+	pipe.AddFinalProvider(gb, surveyor, SurveyorProvider(pf.cfg))
 	pipeline, err := gb.Build()
 	if err != nil {
 		return nil, nil, fmt.Errorf("can't instantiate discovery.ProcessFinder pipeline: %w", err)

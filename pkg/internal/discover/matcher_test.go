@@ -26,7 +26,7 @@ func TestCriteriaMatcher(t *testing.T) {
     exe_path_regexp: "server"
 `), &pipeConfig))
 
-	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	discoveredProcesses := make(chan []Event[processAttrs], 10)
 	filteredProcesses := make(chan []Event[ProcessMatch], 10)
@@ -89,7 +89,7 @@ func TestCriteriaMatcher_Exclude(t *testing.T) {
   - exe_path: s
 `), &pipeConfig))
 
-	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	discoveredProcesses := make(chan []Event[processAttrs], 10)
 	filteredProcesses := make(chan []Event[ProcessMatch], 10)
@@ -135,7 +135,7 @@ func TestCriteriaMatcher_Exclude_Metadata(t *testing.T) {
   - k8s_node_name: bar
 `), &pipeConfig))
 
-	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	discoveredProcesses := make(chan []Event[processAttrs], 10)
 	filteredProcesses := make(chan []Event[ProcessMatch], 10)
@@ -184,7 +184,7 @@ func TestCriteriaMatcher_MustMatchAllAttributes(t *testing.T) {
     k8s_replicaset_name: thers
 `), &pipeConfig))
 
-	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	discoveredProcesses := make(chan []Event[processAttrs], 10)
 	filteredProcesses := make(chan []Event[ProcessMatch], 10)
@@ -240,7 +240,7 @@ func TestCriteriaMatcherMissingPort(t *testing.T) {
     open_ports: 80
 `), &pipeConfig))
 
-	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig)()
+	matcherFunc, err := CriteriaMatcherProvider(&pipeConfig, CriteriaMatcherServices)()
 	require.NoError(t, err)
 	discoveredProcesses := make(chan []Event[processAttrs], 10)
 	filteredProcesses := make(chan []Event[ProcessMatch], 10)

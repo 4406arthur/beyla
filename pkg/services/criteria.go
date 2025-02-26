@@ -38,6 +38,7 @@ type ProcessInfo struct {
 	Pid       int32
 	PPid      int32
 	ExePath   string
+	CmdLine   string
 	OpenPorts []uint32
 }
 
@@ -46,6 +47,9 @@ type DiscoveryConfig struct {
 	// Services selection. If the user defined the BEYLA_EXECUTABLE_NAME or BEYLA_OPEN_PORT variables, they will be automatically
 	// added to the services definition criteria, with the lowest preference.
 	Services DefinitionCriteria `yaml:"services"`
+
+	// Survey selection. Same as services selection, however, it generates the target info instead of instrumenting the services
+	Survey DefinitionCriteria `yaml:"survey"`
 
 	// ExcludeServices works analogously to Services, but the applications matching this section won't be instrumented
 	// even if they match the Services selection.
