@@ -7,6 +7,7 @@ import (
 	"github.com/mariomac/pipes/pipe"
 
 	"github.com/grafana/beyla/v2/pkg/beyla"
+	"github.com/grafana/beyla/v2/pkg/export/otel"
 	"github.com/grafana/beyla/v2/pkg/internal/ebpf"
 	"github.com/grafana/beyla/v2/pkg/internal/ebpf/generictracer"
 	"github.com/grafana/beyla/v2/pkg/internal/ebpf/gotracer"
@@ -38,7 +39,8 @@ type nodesMap struct {
 	// Service survey (discovery only)
 	SurveyCriteriaMatcher pipe.Middle[[]Event[processAttrs], []Event[ProcessMatch]]
 	SurveyExecTyper       pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.Instrumentable]]
-	Surveyor              pipe.Final[[]Event[ebpf.Instrumentable]]
+	Surveyor              pipe.Middle[[]Event[ebpf.Instrumentable], []otel.SurveyInfo]
+	SurveyOTelMetrics     pipe.Final[[]otel.SurveyInfo]
 }
 
 func (pf *nodesMap) Connect() {
@@ -49,6 +51,7 @@ func (pf *nodesMap) Connect() {
 	pf.ContainerDBUpdater.SendTo(pf.TraceAttacher)
 	pf.SurveyCriteriaMatcher.SendTo(pf.SurveyExecTyper)
 	pf.SurveyExecTyper.SendTo(pf.Surveyor)
+	pf.Surveyor.SendTo(pf.SurveyOTelMetrics)
 }
 
 func processWatcher(pf *nodesMap) *pipe.Start[[]Event[processAttrs]] {
@@ -75,8 +78,11 @@ func surveyCriteriaMatcher(pf *nodesMap) *pipe.Middle[[]Event[processAttrs], []E
 func surveyExecTyper(pf *nodesMap) *pipe.Middle[[]Event[ProcessMatch], []Event[ebpf.Instrumentable]] {
 	return &pf.SurveyExecTyper
 }
-func surveyor(pf *nodesMap) *pipe.Final[[]Event[ebpf.Instrumentable]] {
+func surveyor(pf *nodesMap) *pipe.Middle[[]Event[ebpf.Instrumentable], []otel.SurveyInfo] {
 	return &pf.Surveyor
+}
+func surveyorOTelMetrics(pf *nodesMap) *pipe.Final[[]otel.SurveyInfo] {
+	return &pf.SurveyOTelMetrics
 }
 
 func NewProcessFinder(ctx context.Context, cfg *beyla.Config, ctxInfo *global.ContextInfo, tracesInput chan<- []request.Span) *ProcessFinder {
@@ -106,7 +112,11 @@ func (pf *ProcessFinder) Start() (<-chan *ebpf.Instrumentable, <-chan *ebpf.Inst
 		Metrics:             pf.ctxInfo.Metrics,
 		SpanSignalsShortcut: pf.tracesInput,
 	}))
-	pipe.AddFinalProvider(gb, surveyor, SurveyorProvider(pf.cfg))
+	pipe.AddMiddleProvider(gb, surveyor, SurveyorProvider(pf.cfg))
+	pipe.AddFinalProvider(gb, surveyorOTelMetrics, otel.SurveyMetricsExporterProvider(pf.ctx, pf.ctxInfo, &otel.SurveyMetricsConfig{
+		Metrics:            &pf.cfg.Metrics,
+		AttributeSelectors: pf.cfg.Attributes.Select,
+	}))
 	pipeline, err := gb.Build()
 	if err != nil {
 		return nil, nil, fmt.Errorf("can't instantiate discovery.ProcessFinder pipeline: %w", err)

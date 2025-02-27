@@ -217,6 +217,13 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 		},
 	}
 
+	var surveyAttributes = AttrReportGroup{
+		SubGroups: []*AttrReportGroup{&appKubeAttributes, &hostAttributes},
+		Attributes: map[attr.Name]Default{
+			attr.ProcPid: true,
+		},
+	}
+
 	return map[Section]AttrReportGroup{
 		BeylaNetworkFlow.Section: {
 			SubGroups: []*AttrReportGroup{&networkAttributes, &networkCIDR, &networkKubeAttributes},
@@ -277,6 +284,7 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 		ProcessMemoryVirtual.Section:  {SubGroups: []*AttrReportGroup{&processAttributes}},
 		ProcessDiskIO.Section:         {SubGroups: []*AttrReportGroup{&processAttributes}},
 		ProcessNetIO.Section:          {SubGroups: []*AttrReportGroup{&processAttributes}},
+		SurveyInfo.Section:            {SubGroups: []*AttrReportGroup{&surveyAttributes}},
 		GPUKernelLaunchCalls.Section: {
 			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
 			Attributes: map[attr.Name]Default{

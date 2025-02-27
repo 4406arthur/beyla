@@ -17,6 +17,7 @@ type FileInfo struct {
 	Service svc.Attrs
 
 	CmdExePath     string
+	CmdLine        string
 	ProExeLinkPath string
 	ELF            *elf.File
 	Pid            int32
@@ -36,6 +37,10 @@ func (fi *FileInfo) ExecutableName() string {
 	return parts[len(parts)-1]
 }
 
+func (fi *FileInfo) GetUID() svc.UID {
+	return fi.Service.UID
+}
+
 func FindExecELF(p *services.ProcessInfo, svcID svc.Attrs, k8sEnabled bool) (*FileInfo, error) {
 	// In container environments or K8s, we can't just open the executable exe path, because it might
 	// be in the volume of another pod/container. We need to access it through the /proc/<pid>/exe symbolic link
@@ -46,6 +51,7 @@ func FindExecELF(p *services.ProcessInfo, svcID svc.Attrs, k8sEnabled bool) (*Fi
 	file := FileInfo{
 		Service:    svcID,
 		CmdExePath: p.ExePath,
+		CmdLine:    p.CmdLine,
 		// TODO: allow overriding /proc root folder
 		ProExeLinkPath: fmt.Sprintf("/proc/%d/exe", p.Pid),
 		Pid:            p.Pid,

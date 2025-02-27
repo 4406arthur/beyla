@@ -116,6 +116,11 @@ var (
 		Prom:    "gpu_memory_allocations_bytes_total",
 		OTEL:    "gpu.memory.allocations",
 	}
+	SurveyInfo = Name{
+		Section: "survey.info",
+		Prom:    "survey_info",
+		OTEL:    "survey.info",
+	}
 )
 
 // normalizeMetric will facilitate the user-input in the attributes.enable section.

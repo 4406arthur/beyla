@@ -6,6 +6,7 @@ import (
 	"github.com/mariomac/pipes/pipe"
 
 	"github.com/grafana/beyla/v2/pkg/beyla"
+	"github.com/grafana/beyla/v2/pkg/export/otel"
 	"github.com/grafana/beyla/v2/pkg/internal/ebpf"
 )
 
@@ -16,8 +17,8 @@ type Surveyor struct {
 	cfg *beyla.Config
 }
 
-func SurveyorProvider(cfg *beyla.Config) pipe.FinalProvider[[]Event[ebpf.Instrumentable]] {
-	return func() (pipe.FinalFunc[[]Event[ebpf.Instrumentable]], error) {
+func SurveyorProvider(cfg *beyla.Config) pipe.MiddleProvider[[]Event[ebpf.Instrumentable], []otel.SurveyInfo] {
+	return func() (pipe.MiddleFunc[[]Event[ebpf.Instrumentable], []otel.SurveyInfo], error) {
 		s := Surveyor{
 			log: slog.With("component", "discover.Surveyor"),
 			cfg: cfg,
@@ -27,12 +28,19 @@ func SurveyorProvider(cfg *beyla.Config) pipe.FinalProvider[[]Event[ebpf.Instrum
 	}
 }
 
-func (s *Surveyor) run(in <-chan []Event[ebpf.Instrumentable]) {
-	s.log.Debug("starting criteria matcher node")
+func (s *Surveyor) run(in <-chan []Event[ebpf.Instrumentable], out chan<- []otel.SurveyInfo) {
+	s.log.Debug("starting surveyor node")
+
 	for i := range in {
+		var outArr []otel.SurveyInfo
 		s.log.Debug("surveyed new processes", "len", len(i))
 		for _, ins := range i {
 			s.log.Info("surveyed process", "cmd", ins.Obj.FileInfo.CmdExePath)
+			outArr = append(outArr, otel.SurveyInfo{
+				Type: otel.SurveyEventType(ins.Type),
+				File: ins.Obj.FileInfo,
+			})
 		}
+		out <- outArr
 	}
 }
