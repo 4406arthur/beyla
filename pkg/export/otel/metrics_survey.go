@@ -162,8 +162,7 @@ func (me *surveyMetricsExporter) newMetricSet(f *exec.FileInfo) (*surveyMetrics,
 	meter := m.provider.Meter(reporterName)
 
 	if surveyed, err := meter.Int64Gauge(
-		attributes.SurveyInfo.OTEL, metric2.WithUnit("1"),
-		metric2.WithDescription("Surveyed processes"),
+		attributes.SurveyInfo.OTEL, metric2.WithDescription("Surveyed processes"),
 	); err != nil {
 		log.Error("creating observable gauge for "+attributes.SurveyInfo.OTEL, "error", err)
 		return nil, err

@@ -5,6 +5,7 @@ import (
 	"debug/elf"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -48,6 +49,7 @@ func FindExecELF(p *services.ProcessInfo, svcID svc.Attrs, k8sEnabled bool) (*Fi
 	if err != nil {
 		return nil, fmt.Errorf("can't find namespace for PID=%d: %w", p.Pid, err)
 	}
+	svcID.UID.Instance = strconv.Itoa(int(p.Pid))
 	file := FileInfo{
 		Service:    svcID,
 		CmdExePath: p.ExePath,
