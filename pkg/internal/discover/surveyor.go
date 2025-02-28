@@ -35,7 +35,7 @@ func (s *Surveyor) run(in <-chan []Event[ebpf.Instrumentable], out chan<- []otel
 		var outArr []otel.SurveyInfo
 		s.log.Debug("surveyed new processes", "len", len(i))
 		for _, ins := range i {
-			s.log.Info("surveyed process", "cmd", ins.Obj.FileInfo.CmdExePath)
+			s.log.Debug("surveyed process", "cmd", ins.Obj.FileInfo.CmdExePath)
 			outArr = append(outArr, otel.SurveyInfo{
 				Type: otel.SurveyEventType(ins.Type),
 				File: ins.Obj.FileInfo,

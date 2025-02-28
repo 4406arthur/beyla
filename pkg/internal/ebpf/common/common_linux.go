@@ -61,7 +61,7 @@ func hasCapSysAdmin() bool {
 	return err == nil && caps.Has(unix.CAP_SYS_ADMIN)
 }
 
-func findNetworkNamespace(pid int32) (string, error) {
+func FindNetworkNamespace(pid int32) (string, error) {
 	netPath := fmt.Sprintf("/proc/%d/ns/net", pid)
 	f, err := os.Open(netPath)
 
@@ -87,13 +87,13 @@ func HasHostPidAccess() bool {
 
 func HasHostNetworkAccess() (bool, error) {
 	// Get the network namespace of the current process
-	containerNS, err := findNetworkNamespace(int32(os.Getpid()))
+	containerNS, err := FindNetworkNamespace(int32(os.Getpid()))
 	if err != nil {
 		return false, err
 	}
 
 	// Get the network namespace of the host process (PID 1)
-	hostNS, err := findNetworkNamespace(1)
+	hostNS, err := FindNetworkNamespace(1)
 	if err != nil {
 		return false, err
 	}

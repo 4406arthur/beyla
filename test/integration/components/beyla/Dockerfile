@@ -23,7 +23,7 @@ COPY Makefile Makefile
 RUN make compile-for-coverage
 
 # Create final image from minimal + built binary
-FROM scratch
+FROM ubuntu:latest
 
 WORKDIR /
 COPY --from=builder /src/bin/beyla .

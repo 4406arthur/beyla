@@ -12,6 +12,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/grafana/beyla/v2/pkg/beyla"
+	ebpfcommon "github.com/grafana/beyla/v2/pkg/internal/ebpf/common"
 	"github.com/grafana/beyla/v2/pkg/services"
 )
 
@@ -25,12 +26,14 @@ const (
 // CriteriaMatcherProvider filters the processes that match the discovery criteria.
 func CriteriaMatcherProvider(cfg *beyla.Config, mode CriteriaMatcherMode) pipe.MiddleProvider[[]Event[processAttrs], []Event[ProcessMatch]] {
 	return func() (pipe.MiddleFunc[[]Event[processAttrs], []Event[ProcessMatch]], error) {
+		beylaNamespace, _ := ebpfcommon.FindNetworkNamespace(int32(os.Getpid()))
 		m := &matcher{
 			log:             slog.With("component", "discover.CriteriaMatcher"),
 			mode:            mode,
 			criteria:        FindingCriteria(cfg, mode),
 			excludeCriteria: append(cfg.Discovery.ExcludeServices, cfg.Discovery.DefaultExcludeServices...),
 			processHistory:  map[PID]*services.ProcessInfo{},
+			beylaNamespace:  beylaNamespace,
 		}
 
 		return m.run, nil
@@ -46,6 +49,7 @@ type matcher struct {
 	// instrumentation.
 	// This avoids keep inspecting again and again client processes each time they open a new connection port
 	processHistory map[PID]*services.ProcessInfo
+	beylaNamespace string
 }
 
 // ProcessMatch matches a found process with the first selection criteria it fulfilled.
@@ -156,6 +160,13 @@ func (m *matcher) matchProcess(obj *processAttrs, p *services.ProcessInfo, a *se
 	if a.OpenPorts.Len() > 0 && !m.matchByPort(p, a) {
 		log.Debug("open ports do not match", "openPorts", a.OpenPorts)
 		return false
+	}
+	if a.ContainersOnly {
+		ns, _ := ebpfcommon.FindNetworkNamespace(p.Pid)
+		if ns == m.beylaNamespace {
+			log.Debug("not in a container", "namespace", ns)
+			return false
+		}
 	}
 	// after matching by process basic information, we check if it matches
 	// by metadata.
