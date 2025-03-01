@@ -597,6 +597,8 @@ func (tr *tracesOTELReceiver) acceptSpan(span *request.Span) bool {
 		return tr.is.RedisEnabled()
 	case request.EventTypeKafkaClient, request.EventTypeKafkaServer:
 		return tr.is.KafkaEnabled()
+	case request.EventTypeJSONRPC:
+		return true
 	}
 
 	return false
@@ -640,7 +642,6 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 		if span.HasOriginalHost() {
 			url = request.URLFull(scheme, host, span.Path)
 		}
-
 		attrs = []attribute.KeyValue{
 			request.HTTPRequestMethod(span.Method),
 			request.HTTPResponseStatusCode(span.Status),
@@ -701,6 +702,40 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			semconv.MessagingClientID(span.Statement),
 			operation,
 		}
+	case request.EventTypeJSONRPC:
+		// Add RPC system attribute
+		attrs = []attribute.KeyValue{
+			attribute.String("rpc.system", "jsonrpc"),
+			attribute.String("rpc.jsonrpc.version", "2.0"),
+		}
+
+		// Add method if available
+		if span.Method != "" {
+			attrs = append(attrs, attribute.String("rpc.method", span.Method))
+		}
+
+		// Add service name if possible (from method name)
+		if span.Method != "" {
+			if parts := strings.Split(span.Method, "."); len(parts) > 1 {
+				attrs = append(attrs, attribute.String("rpc.service", parts[0]))
+			}
+		}
+
+		// Add request ID if available (stored in Path)
+		if span.Path != "" {
+			attrs = append(attrs, attribute.String("rpc.jsonrpc.request_id", span.Path))
+		}
+
+		// Add error code if present
+		if span.Status != 0 {
+			attrs = append(attrs, attribute.Int("rpc.jsonrpc.error_code", span.Status))
+		}
+
+		// Add server information
+		attrs = append(attrs,
+			request.ServerAddr(request.HostAsServer(span)),
+			request.ServerPort(span.HostPort),
+		)
 	}
 
 	if _, ok := optionalAttrs[attr.SkipSpanMetrics]; ok {
@@ -723,6 +758,8 @@ func spanKind(span *request.Span) trace2.SpanKind {
 		case request.MessagingProcess:
 			return trace2.SpanKindConsumer
 		}
+	case request.EventTypeJSONRPC:
+		return trace2.SpanKindClient
 	}
 	return trace2.SpanKindInternal
 }

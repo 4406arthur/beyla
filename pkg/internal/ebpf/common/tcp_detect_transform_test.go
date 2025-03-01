@@ -169,6 +169,328 @@ func TestTCPReqKafkaParsing(t *testing.T) {
 	assert.Equal(t, request.EventTypeKafkaClient, s.Type)
 }
 
+func TestTryParseJSONRPC(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        []byte
+		wantLen      int
+		wantMethod   string
+		wantStatus   string
+		wantMetaKeys []string
+	}{
+		{
+			name:         "Valid JSON-RPC request",
+			input:        []byte(`{"jsonrpc": "2.0", "method": "subtract", "params": [42, 23], "id": 1}`),
+			wantLen:      61,
+			wantMethod:   "subtract",
+			wantStatus:   "",
+			wantMetaKeys: []string{"jsonrpc.version", "jsonrpc.request_id", "jsonrpc.params"},
+		},
+		{
+			name:         "Valid JSON-RPC response success",
+			input:        []byte(`{"jsonrpc": "2.0", "result": 19, "id": 1}`),
+			wantLen:      39,
+			wantMethod:   "",
+			wantStatus:   "OK",
+			wantMetaKeys: []string{"jsonrpc.version", "jsonrpc.request_id"},
+		},
+		{
+			name:         "Valid JSON-RPC response error",
+			input:        []byte(`{"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": 1}`),
+			wantLen:      80,
+			wantMethod:   "",
+			wantStatus:   "ERROR",
+			wantMetaKeys: []string{"jsonrpc.version", "jsonrpc.request_id", "jsonrpc.error_code", "jsonrpc.error_message"},
+		},
+		{
+			name:         "Not JSON",
+			input:        []byte(`not json`),
+			wantLen:      0,
+			wantMethod:   "",
+			wantStatus:   "",
+			wantMetaKeys: nil,
+		},
+		{
+			name:         "Invalid JSON-RPC (no version)",
+			input:        []byte(`{"method": "subtract", "params": [42, 23], "id": 1}`),
+			wantLen:      0,
+			wantMethod:   "",
+			wantStatus:   "",
+			wantMetaKeys: nil,
+		},
+		{
+			name:         "Invalid JSON-RPC (wrong version)",
+			input:        []byte(`{"jsonrpc": "1.0", "method": "subtract", "params": [42, 23], "id": 1}`),
+			wantLen:      0,
+			wantMethod:   "",
+			wantStatus:   "",
+			wantMetaKeys: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			span := &request.Span{Meta: make(map[string]string)}
+			gotLen, _ := tryParseJSONRPC(tt.input, span)
+
+			if gotLen != tt.wantLen {
+				t.Errorf("tryParseJSONRPC() gotLen = %v, want %v", gotLen, tt.wantLen)
+			}
+
+			if gotLen > 0 {
+				if span.Method != tt.wantMethod {
+					t.Errorf("tryParseJSONRPC() Method = %v, want %v", span.Method, tt.wantMethod)
+				}
+
+				if span.Status != tt.wantStatus {
+					t.Errorf("tryParseJSONRPC() Status = %v, want %v", span.Status, tt.wantStatus)
+				}
+
+				for _, key := range tt.wantMetaKeys {
+					if _, ok := span.Meta[key]; !ok {
+						t.Errorf("tryParseJSONRPC() Meta missing key = %v", key)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestJSONRPCDetection(t *testing.T) {
+	testCases := []struct {
+		name           string
+		requestData    []byte
+		responseData   []byte
+		expectDetected bool
+		expectMethod   string
+		expectID       string
+		expectStatus   int
+	}{
+		{
+			name:           "Valid JSON-RPC request and success response",
+			requestData:    []byte(`{"jsonrpc": "2.0", "method": "subtract", "params": [42, 23], "id": 1}`),
+			responseData:   []byte(`{"jsonrpc": "2.0", "result": 19, "id": 1}`),
+			expectDetected: true,
+			expectMethod:   "subtract",
+			expectID:       "1",
+			expectStatus:   0,
+		},
+		{
+			name:           "Valid JSON-RPC request with error response",
+			requestData:    []byte(`{"jsonrpc": "2.0", "method": "unknown_method", "id": 2}`),
+			responseData:   []byte(`{"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": 2}`),
+			expectDetected: true,
+			expectMethod:   "unknown_method",
+			expectID:       "2",
+			expectStatus:   -32601,
+		},
+		{
+			name:           "Invalid JSON",
+			requestData:    []byte(`not json`),
+			responseData:   []byte(`also not json`),
+			expectDetected: false,
+		},
+		{
+			name:           "Valid JSON but not JSON-RPC",
+			requestData:    []byte(`{"foo": "bar"}`),
+			responseData:   []byte(`{"result": "ok"}`),
+			expectDetected: false,
+		},
+		{
+			name:           "Valid JSON-RPC but wrong version",
+			requestData:    []byte(`{"jsonrpc": "1.0", "method": "subtract", "params": [42, 23], "id": 1}`),
+			responseData:   []byte(`{"jsonrpc": "1.0", "result": 19, "id": 1}`),
+			expectDetected: false,
+		},
+		{
+			name:           "Only response available",
+			requestData:    []byte(``),
+			responseData:   []byte(`{"jsonrpc": "2.0", "result": 19, "id": 1}`),
+			expectDetected: true,
+			expectMethod:   "",
+			expectID:       "1",
+			expectStatus:   0,
+		},
+		{
+			name:           "Only error response available",
+			requestData:    []byte(``),
+			responseData:   []byte(`{"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": null}`),
+			expectDetected: true,
+			expectMethod:   "",
+			expectID:       "",
+			expectStatus:   -32700,
+		},
+		{
+			name:           "Notification request (no id)",
+			requestData:    []byte(`{"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}`),
+			responseData:   []byte(``),
+			expectDetected: true,
+			expectMethod:   "update",
+			expectID:       "",
+			expectStatus:   0,
+		},
+		{
+			name:           "Method with namespace",
+			requestData:    []byte(`{"jsonrpc": "2.0", "method": "eth.getBalance", "params": ["0x1234"], "id": "abc"}`),
+			responseData:   []byte(`{"jsonrpc": "2.0", "result": "0x5678", "id": "abc"}`),
+			expectDetected: true,
+			expectMethod:   "eth.getBalance",
+			expectID:       "abc",
+			expectStatus:   0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := makeTCPReq(string(tc.requestData), tcpSend, 34343, 8080, 1000)
+
+			// Make a copy of the request for the response
+			resp := req
+			copy(resp.Buf[:], tc.responseData)
+			resp.Len = uint32(len(tc.responseData))
+
+			// Test detection
+			span := tryDetectJSONRPC(&req, req.Buf[:req.Len], resp.Buf[:resp.Len])
+
+			if tc.expectDetected {
+				require.NotNil(t, span, "Expected JSON-RPC to be detected")
+				assert.Equal(t, request.EventTypeJSONRPC, span.Type, "Expected correct event type")
+				assert.Equal(t, tc.expectMethod, span.Method, "Expected correct method")
+				assert.Equal(t, tc.expectID, span.Path, "Expected correct ID in Path field")
+				assert.Equal(t, tc.expectStatus, span.Status, "Expected correct status")
+				assert.Greater(t, span.End, span.Start, "Expected valid timestamps")
+			} else {
+				assert.Nil(t, span, "Expected no JSON-RPC detection")
+			}
+		})
+	}
+}
+
+func TestJSONRPCParsing(t *testing.T) {
+	testCases := []struct {
+		name         string
+		input        []byte
+		expectLen    int
+		expectMethod string
+		expectID     string
+	}{
+		{
+			name:         "Valid request with numeric ID",
+			input:        []byte(`{"jsonrpc": "2.0", "method": "subtract", "params": [42, 23], "id": 1}`),
+			expectLen:    61,
+			expectMethod: "subtract",
+			expectID:     "1",
+		},
+		{
+			name:         "Valid request with string ID",
+			input:        []byte(`{"jsonrpc": "2.0", "method": "echo", "params": {"message": "Hello"}, "id": "abc123"}`),
+			expectLen:    75,
+			expectMethod: "echo",
+			expectID:     "abc123",
+		},
+		{
+			name:         "Notification (no ID)",
+			input:        []byte(`{"jsonrpc": "2.0", "method": "update", "params": [1,2,3,4,5]}`),
+			expectLen:    55,
+			expectMethod: "update",
+			expectID:     "",
+		},
+		{
+			name:         "Not JSON",
+			input:        []byte(`not json`),
+			expectLen:    0,
+			expectMethod: "",
+			expectID:     "",
+		},
+		{
+			name:         "Not JSON-RPC",
+			input:        []byte(`{"method": "test", "id": 1}`),
+			expectLen:    0,
+			expectMethod: "",
+			expectID:     "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			length, method, id := parseJSONRPC(tc.input)
+			assert.Equal(t, tc.expectLen, length, "Expected correct length")
+			assert.Equal(t, tc.expectMethod, method, "Expected correct method")
+			assert.Equal(t, tc.expectID, id, "Expected correct ID")
+		})
+	}
+}
+
+func TestJSONRPCResponseParsing(t *testing.T) {
+	testCases := []struct {
+		name          string
+		input         []byte
+		expectLen     int
+		expectSuccess bool
+		expectID      string
+		expectCode    int
+	}{
+		{
+			name:          "Success response",
+			input:         []byte(`{"jsonrpc": "2.0", "result": 19, "id": 1}`),
+			expectLen:     39,
+			expectSuccess: true,
+			expectID:      "1",
+			expectCode:    0,
+		},
+		{
+			name:          "Error response",
+			input:         []byte(`{"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": 2}`),
+			expectLen:     80,
+			expectSuccess: false,
+			expectID:      "2",
+			expectCode:    -32601,
+		},
+		{
+			name:          "Error response with string ID",
+			input:         []byte(`{"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": "abc"}`),
+			expectLen:     78,
+			expectSuccess: false,
+			expectID:      "abc",
+			expectCode:    -32700,
+		},
+		{
+			name:          "Not JSON",
+			input:         []byte(`not json`),
+			expectLen:     0,
+			expectSuccess: false,
+			expectID:      "",
+			expectCode:    0,
+		},
+		{
+			name:          "Not JSON-RPC response",
+			input:         []byte(`{"result": "ok", "id": 1}`),
+			expectLen:     0,
+			expectSuccess: false,
+			expectID:      "",
+			expectCode:    0,
+		},
+		{
+			name:          "Invalid JSON-RPC response (no result or error)",
+			input:         []byte(`{"jsonrpc": "2.0", "id": 1}`),
+			expectLen:     0,
+			expectSuccess: false,
+			expectID:      "",
+			expectCode:    0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			length, success, id, code := parseJSONRPCResponse(tc.input)
+			assert.Equal(t, tc.expectLen, length, "Expected correct length")
+			assert.Equal(t, tc.expectSuccess, success, "Expected correct success flag")
+			assert.Equal(t, tc.expectID, id, "Expected correct ID")
+			assert.Equal(t, tc.expectCode, code, "Expected correct error code")
+		})
+	}
+}
+
 const charset = "\\0\\1\\2abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func randomString(length int) string {

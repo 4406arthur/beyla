@@ -36,6 +36,7 @@ const (
 	EventTypeKafkaServer
 	EventTypeGPUKernelLaunch
 	EventTypeGPUMalloc
+	EventTypeJSONRPC // Add the new JSON-RPC event type
 )
 
 const (
@@ -84,6 +85,8 @@ func (t EventType) String() string {
 		return "CUDALaunch"
 	case EventTypeGPUMalloc:
 		return "CUDAMalloc"
+	case EventTypeJSONRPC:
+		return "JSONRPC"
 	default:
 		return fmt.Sprintf("UNKNOWN (%d)", t)
 	}
@@ -373,6 +376,13 @@ func SpanStatusCode(span *Span) codes.Code {
 			return codes.Error
 		}
 		return codes.Unset
+	case EventTypeJSONRPC:
+		// For JSON-RPC, a non-zero status code indicates an error
+		// The status code corresponds to the error code in the JSON-RPC response
+		if span.Status != 0 {
+			return codes.Error
+		}
+		return codes.Unset
 	}
 	return codes.Unset
 }
@@ -432,7 +442,7 @@ func (s *Span) ServiceGraphKind() string {
 	switch s.Type {
 	case EventTypeHTTP, EventTypeGRPC, EventTypeKafkaServer, EventTypeRedisServer:
 		return "SPAN_KIND_SERVER"
-	case EventTypeHTTPClient, EventTypeGRPCClient, EventTypeSQLClient, EventTypeRedisClient:
+	case EventTypeHTTPClient, EventTypeGRPCClient, EventTypeSQLClient, EventTypeRedisClient, EventTypeJSONRPC:
 		return "SPAN_KIND_CLIENT"
 	case EventTypeKafkaClient:
 		switch s.Method {
@@ -477,6 +487,11 @@ func (s *Span) TraceName() string {
 			return s.Method
 		}
 		return fmt.Sprintf("%s %s", s.Path, s.Method)
+	case EventTypeJSONRPC:
+		if s.Method == "" {
+			return "JSON-RPC"
+		}
+		return s.Method
 	}
 	return ""
 }
